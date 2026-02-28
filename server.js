@@ -7,6 +7,9 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+/*
+DATABASE CONNECTION
+*/
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
@@ -14,10 +17,16 @@ const pool = new Pool({
   },
 });
 
+/*
+ROOT ENDPOINT (for testing)
+*/
 app.get("/", (req, res) => {
   res.send("Bitespeed Identity Reconciliation API is running");
 });
 
+/*
+IDENTIFY ENDPOINT
+*/
 app.post("/identify", async (req, res) => {
   try {
     const { email, phoneNumber } = req.body;
@@ -28,20 +37,30 @@ app.post("/identify", async (req, res) => {
       });
     }
 
+    /*
+    FIND EXISTING CONTACT
+    */
     const existing = await pool.query(
-      `SELECT * FROM Contact
-       WHERE email = $1 OR phoneNumber = $2
-       ORDER BY createdAt ASC`,
+      `
+      SELECT * FROM Contact
+      WHERE email = $1 OR phoneNumber = $2
+      ORDER BY createdAt ASC
+      `,
       [email, phoneNumber]
     );
 
     let primaryContact;
 
+    /*
+    IF NO CONTACT EXISTS → CREATE PRIMARY
+    */
     if (existing.rows.length === 0) {
       const newContact = await pool.query(
-        `INSERT INTO Contact (email, phoneNumber, linkPrecedence)
-         VALUES ($1,$2,'primary')
-         RETURNING *`,
+        `
+        INSERT INTO Contact (email, phoneNumber, linkPrecedence)
+        VALUES ($1,$2,'primary')
+        RETURNING *
+        `,
         [email, phoneNumber]
       );
 
@@ -50,15 +69,24 @@ app.post("/identify", async (req, res) => {
       primaryContact = existing.rows[0];
     }
 
+    /*
+    GET ALL LINKED CONTACTS
+    */
     const linked = await pool.query(
-      `SELECT * FROM Contact
-       WHERE id = $1 OR linkedId = $1`,
+      `
+      SELECT * FROM Contact
+      WHERE id = $1 OR linkedId = $1
+      `,
       [primaryContact.id]
     );
 
-    const emails = [...new Set(linked.rows.map(c => c.email).filter(Boolean))];
+    const emails = [
+      ...new Set(linked.rows.map(c => c.email).filter(Boolean))
+    ];
 
-    const phones = [...new Set(linked.rows.map(c => c.phonenumber).filter(Boolean))];
+    const phones = [
+      ...new Set(linked.rows.map(c => c.phonenumber).filter(Boolean))
+    ];
 
     const secondaryIds = linked.rows
       .filter(c => c.linkprecedence === "secondary")
@@ -73,14 +101,17 @@ app.post("/identify", async (req, res) => {
       },
     });
 
-  } catch (error) {
-    console.error(error);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({
-      error: "Server error",
+      error: "Server error"
     });
   }
 });
 
+/*
+RENDER PORT
+*/
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
